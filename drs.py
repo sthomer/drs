@@ -2,11 +2,8 @@ import numpy as np
 import scipy.la as la
 import eiscor
 
-# def fpt(cs: np.ndarray) -> np.ndarray:
-
 
 def fit_q_poly(cs: np.ndarray, K: int) -> np.ndarray:
-
     assert K <= len(cs) // 2
     try:
         q = la.solve_toeplitz((cs[K : 2 * K], np.flip(cs[1 : K + 1])), -cs[:K])
@@ -14,7 +11,6 @@ def fit_q_poly(cs: np.ndarray, K: int) -> np.ndarray:
         return np.insert(np.flip(q), 0, 1)
 
     except la.LinAlgError as e:
-
         A = la.hankel(cs[1 : K + 1], cs[K : 2 * K])
         b = -cs[:K]
         qs_ = la.lstsq(A, b)[0]
@@ -23,7 +19,6 @@ def fit_q_poly(cs: np.ndarray, K: int) -> np.ndarray:
 
 
 def fit_p_poly(cs: np.ndarray, qs: np.ndarray, K: int) -> np.ndarray:
-
     assert K <= len(cs) // 2
 
     A = np.array([np.append([0] * i, cs[: K - i]) for i in range(K)])
@@ -33,7 +28,6 @@ def fit_p_poly(cs: np.ndarray, qs: np.ndarray, K: int) -> np.ndarray:
 
 
 def poly_roots(qs: np.ndarray) -> np.ndarray:
-
     K = len(qs)
     qs_ = np.asfortranarray(np.flip(qs), dtype=np.complex128)
     zs_ = np.zeros(K - 1, dtype=np.complex128, order="F")
@@ -47,7 +41,6 @@ def poly_roots(qs: np.ndarray) -> np.ndarray:
 def resonant_amplitudes(
     cs: np.ndarray, qs: np.ndarray, ps: np.ndarray, zs: np.ndarray, K: int
 ) -> np.ndarray:
-
     assert len(zs) <= len(cs) // 2 <= K
 
     i = np.arange(1, K + 1)
@@ -68,8 +61,9 @@ def resonant_frequencies(zs: np.ndarray, sample_rate: int) -> np.ndarray:
     return sample_rate * 1j * np.log(zs)
 
 
-def fpt(cs: np.ndarray, K: int, sample_rate: int) -> tuple[np.ndarray, np.ndarray]:
-
+def fpt(
+    cs: np.ndarray, K: int, sample_rate: int
+) -> tuple[np.ndarray, np.ndarray]:
     qs = fit_q_poly(cs, K)
     ps = fit_p_poly(cs, qs, K)
     zs = poly_roots(qs)
@@ -79,8 +73,9 @@ def fpt(cs: np.ndarray, K: int, sample_rate: int) -> tuple[np.ndarray, np.ndarra
     return ds, ws, zs
 
 
-def bifpt(cs: np.ndarray, K: int, sample_rate: int) -> np.ndarray:
-
+def bifpt(
+    cs: np.ndarray, K: int, sample_rate: int
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     ds_in_, ws_in_, zs_in_ = fpt(cs, K, sample_rate)
     ds_in = ds_in_[ws_in_.imag < 0]
     ws_in = ws_in_[ws_in_.imag < 0]
@@ -99,3 +94,7 @@ def bifpt(cs: np.ndarray, K: int, sample_rate: int) -> np.ndarray:
     zs = np.concatenate((zs_in, zs_out))
 
     return ds, ws, zs
+
+
+def reconstruction(ds: np.ndarray, zs: np.ndarray, N: int) -> np.ndarray:
+    return ds * np.power(zs, np.arange(0, N))
