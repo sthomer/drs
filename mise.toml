@@ -1,0 +1,18 @@
+[tools]
+python = "3.13"
+
+[env]
+PYTHONPATH = "{{config_root}}/lib/eiscor"
+DYLD_LIBRARY_PATH = "{{config_root}}/lib/eiscor"
+
+[tasks.build]
+description = "Compile and wrap Fortran source for Python"
+run = """
+  cd lib/eiscor
+  HOME=. make install
+  cp eiscor/lib/*dylib* .
+  rm -rf eiscor
+  FC="gfortran" python -m numpy.f2py -c -L$PWD -leiscor \
+  src/complex_double/z_poly_roots.f90 -m eiscor \
+  --backend meson
+"""
