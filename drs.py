@@ -2,47 +2,42 @@ import numpy as np
 import scipy.la as la
 import eiscor
 
+NDArrayF64 = np.ndarray[tuple[int], np.dtype[np.float64]]
+NDArrayC128 = np.ndarray[tuple[int], np.dtype[np.complex128]]
 
-def fit_q_poly(cs: np.ndarray, K: int) -> np.ndarray:
-    assert K <= len(cs) // 2
+
+def fit_q_poly(cs: NDArrayF64, K: int) -> NDArrayF64:
+    assert K <= cs.size // 2
     try:
         q = la.solve_toeplitz((cs[K : 2 * K], np.flip(cs[1 : K + 1])), -cs[:K])
-
         return np.insert(np.flip(q), 0, 1)
-
     except la.LinAlgError as e:
         A = la.hankel(cs[1 : K + 1], cs[K : 2 * K])
         b = -cs[:K]
         qs_ = la.lstsq(A, b)[0]
-
         return np.insert(qs_, 0, 1)
 
 
-def fit_p_poly(cs: np.ndarray, qs: np.ndarray, K: int) -> np.ndarray:
+def fit_p_poly(cs: NDArrayF64, qs: NDArrayF64, K: int) -> NDArrayF64:
     assert K <= len(cs) // 2
-
     A = np.array([np.append([0] * i, cs[: K - i]) for i in range(K)])
     p = A @ qs[1:]
-
     return np.insert(p, 0, 0)
 
 
-def poly_roots(qs: np.ndarray) -> np.ndarray:
-    K = len(qs)
+def poly_roots(qs: NDArrayF64) -> NDArrayC128:
     qs_ = np.asfortranarray(np.flip(qs), dtype=np.complex128)
-    zs_ = np.zeros(K - 1, dtype=np.complex128, order="F")
-    rs_ = np.zeros(K - 1, dtype=np.float64, order="F")
+    zs_ = np.zeros(qs.size - 1, dtype=np.complex128, order="F")
+    rs_ = np.zeros(qs.size - 1, dtype=np.float64, order="F")
     i_ = np.array(0)
     eiscor.z_poly_roots(qs_, zs_, rs_, i_)
-
     return np.ascontiguousarray(zs_)
 
 
 def resonant_amplitudes(
-    cs: np.ndarray, qs: np.ndarray, ps: np.ndarray, zs: np.ndarray, K: int
-) -> np.ndarray:
-    assert len(zs) <= len(cs) // 2 <= K
-
+    cs: NDArrayF64, qs: NDArrayF64, ps: NDArrayF64, zs: NDArrayC128, K: int
+) -> NDArrayC128:
+    assert zs.size <= K <= cs.size // 2
     i = np.arange(1, K + 1)
     exponent = np.tile(i, (K, 1))
     Z = np.power(zs.reshape(-1, 1), exponent)
@@ -53,29 +48,27 @@ def resonant_amplitudes(
         ps = ps
         qs = qs
     d = np.divide(Z @ ps[1:].reshape(-1, 1), Z @ (qs[1:] * i).reshape(-1, 1))
-
     return d.reshape((-1,))
 
 
-def resonant_frequencies(zs: np.ndarray, sample_rate: int) -> np.ndarray:
+def resonant_frequencies(zs: NDArrayC128, sample_rate: int) -> NDArrayC128:
     return sample_rate * 1j * np.log(zs)
 
 
 def fpt(
-    cs: np.ndarray, K: int, sample_rate: int
-) -> tuple[np.ndarray, np.ndarray]:
+    cs: NDArrayF64, K: int, sample_rate: int
+) -> tuple[NDArrayC128, NDArrayC128, NDArrayC128]:
     qs = fit_q_poly(cs, K)
     ps = fit_p_poly(cs, qs, K)
     zs = poly_roots(qs)
     ds = resonant_amplitudes(cs, qs, ps, zs, K)
     ws = resonant_frequencies(zs, sample_rate)
-
     return ds, ws, zs
 
 
 def bifpt(
-    cs: np.ndarray, K: int, sample_rate: int
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    cs: NDArrayF64, K: int, sample_rate: int
+) -> tuple[NDArrayC128, NDArrayC128, NDArrayC128]:
     ds_in_, ws_in_, zs_in_ = fpt(cs, K, sample_rate)
     ds_in = ds_in_[ws_in_.imag < 0]
     ws_in = ws_in_[ws_in_.imag < 0]
@@ -96,5 +89,5 @@ def bifpt(
     return ds, ws, zs
 
 
-def reconstruction(ds: np.ndarray, zs: np.ndarray, N: int) -> np.ndarray:
+def reconstruction(ds: NDArrayC128, zs: NDArrayC128, N: int) -> NDArrayF64:
     return ds * np.power(zs, np.arange(0, N))
