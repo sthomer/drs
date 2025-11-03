@@ -1,10 +1,10 @@
 install:
-	make -C lib/eiscor install
-	FC="gfortran" python -m numpy.f2py -c -L$(PWD)/lib/eiscor -leiscor \
-	   lib/eiscor/src/complex_double/z_poly_roots.f90 -m eiscor \
+	make -C eiscor install
+	FC="gfortran" python -m numpy.f2py -c -L$(PWD)/eiscor -leiscor \
+	   eiscor/src/complex_double/z_poly_roots.f90 -m eiscor \
 	   --backend meson
-	cp lib/eiscor/*dylib* .
+	cp eiscor/*dylib* .
 
 clean:
-	make -C lib/eiscor clean
-	rm -f eiscor*.so libeiscor*
+	make -C eiscor clean
+	rm -rf eiscor*.so libeiscor* __pycache__
