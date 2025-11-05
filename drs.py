@@ -1,6 +1,7 @@
 import numpy as np
 import scipy.linalg as la
 import eiscor
+import matplotlib.pyplot as plt
 
 NDArrayF64 = np.ndarray[tuple[int], np.dtype[np.float64]]
 NDArrayC128 = np.ndarray[tuple[int], np.dtype[np.complex128]]
