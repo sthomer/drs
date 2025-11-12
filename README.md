@@ -12,11 +12,19 @@
 
 ## Usage
 
-- Call `bifpt(cs, K)` to calculate the resonance decomposition of the signal `cs`.
-    - If not provided, `K` defaults to `len(cs) // 2`
-    - The results is a matrix of shape `(2, K)`.
+- Call `drs(cs, window_length)` to calculate the resonance decomposition of the signal `cs`.
+    - This results in a list of pairs `(ds_zs, ds_zs_rev)`, one for each slice.
+    - The first element in the pair corresponds to the forward pass.
+        - It is a matrix of shape `(2, K')`, where `K'` is the number of _damping_ resonances.
         - The first row contains the resonant amplitudes ($d_k$).
         - The second row contains the corresponding poles ($z_k$).
-        - To separate them, call `ds, zs = np.unstack(bifpt(cs, K))`.
-    - You can convert the poles to resonant frequencies with `resonant_frequency(z, sample_rate)`
-- Call `reconstruction(ds, zs, N)` to calculate the signal from the given resonances.
+    - The second element in the pair corresponds to the backward pass.
+        - It is a matrix of shape `(2, K')`, where `K'` is the number of _ramping_ resonances.
+        - The first row contains the resonant amplitudes ($d_k$).
+        - The second row contains the corresponding poles ($z_k$).
+    - Note: `ds_zs_rev` is not transformed to forward time!
+        - They correspond to the resonances of the backward signal.
+        - To transform to forward time, use `mirror(ds_zs, N)`.
+    - To separate, call `ds, zs = np.unstack(ds_zs)`.
+    - Convert the poles `zs` to resonant frequencies with `resonant_frequency(z, sample_rate)`
+- Call `reconstruction(ds_zs, ds_zs_rev, N)` to calculate the signal from the given resonances.
