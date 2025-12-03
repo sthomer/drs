@@ -5,9 +5,12 @@
 - You only have to do this once!
 - Run `make install` to compile and link the fortran source.
     - Requirements
+        - `python` duh.
         - `gfortran` compiler to compile the fortran. (Install with `brew install gcc`)
-        - `numpy.f2py` module to wrap and link fortain. (Install with `pip install numpy`)
-- The generated library files (`.dylib`, `.so`) must be in the pythonpath.
+        - `meson` build system. (Install with `brew install meson`)
+        - `ninja` build system. (Install with `brew install ninja`)
+        - `numpy.f2py` module to wrap and link fortan. (Install with `pip install numpy`)
+- The generated library files (mac: `.dylib`, windows: `.dll`, or linux: `.so`) must be in the pythonpath.
     - Easiest way is to keep them in the same directory as the python file.
 
 ## Usage
