@@ -1,5 +1,6 @@
 from time import perf_counter
 
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.linalg as la
@@ -46,7 +47,7 @@ def resonant_amplitudes(qs, ps, zs, K):
 
 
 def resonant_frequencies(zs, sample_rate):
-    return sample_rate * 1j * np.log(zs)
+    return sample_rate * 1j * np.log(zs) / (2 * np.pi)
 
 
 def fpt(cs, K=None, atol=1e-10):
@@ -75,6 +76,16 @@ def frequency(ws):
 
 def decay(ws):
     return np.imag(ws)
+
+
+def power(dzs, window_length):
+    d, z = np.unstack(dzs)
+    d2, z2, n = np.abs(d) ** 2, np.abs(z) ** 2, window_length
+    return (d2 / n) * ((z2**n - 1) / (z2 - 1)) / n
+    # Fast version is numerically unstable, resulting in NaNs
+    # d2, z2, N = self.amplitude ** 2, abs(self.z) ** 2, self.N
+    # return (d2 / N) * ((z2 ** N - 1) / (z2 - 1))
+    # return np.sum(np.absolute(self.reconstruction) ** 2) / self.N
 
 
 def mirror(dzs, N):
@@ -127,17 +138,62 @@ def spectral_params(dzs, dzs_rev, window_length, sample_rate):
 
 
 def plot_drs(spectrogram, sample_rate):
-    amplitudes, phases, frequencies, decays, offsets, window_length = [
-        [b for a in x for b in a] for x in zip(*spectrogram)
-    ]
-    _, ax = plt.subplots()
-    ax.scatter(
-        np.array(offsets) / sample_rate,
-        frequencies,
-        c=amplitudes,
-        cmap="binary",
-        marker="_",
-    )
+
+    powers = []
+    amplitudes = []
+    phases = []
+    frequencies = []
+    decays = []
+    offsets = []
+    window_lengths = []
+
+    for dzs, dzs_rev, offset, window_length in spectrogram:
+        amplitudes_, phases_, frequencies_, decays_ = np.unstack(
+            spectral_params(dzs, dzs_rev, window_length, sample_rate)
+        )
+        ps_in = power(dzs, window_length)
+        ps_out = power(dzs_rev, window_length)
+        powers_ = np.concatenate((ps_in, ps_out))
+
+        powers += powers_.tolist()
+        amplitudes += amplitudes_.tolist()
+        phases += phases_.tolist()
+        frequencies += frequencies_.tolist()
+        decays += decays_.tolist()
+        offsets += [offset] * len(amplitudes_)
+        window_lengths += [window_length] * len(amplitudes_)
+
+    frequencies = np.array(frequencies)
+    powers = np.array(powers)[frequencies >= 0]
+    amplitudes = np.array(amplitudes)[frequencies >= 0]
+    phases = np.array(phases)[frequencies >= 0]
+    decays = np.array(decays)[frequencies >= 0]
+    offsets = np.array(offsets)[frequencies >= 0] / sample_rate
+    window_lengths = np.array(window_lengths)[frequencies >= 0] / sample_rate
+    frequencies = frequencies[frequencies >= 0]
+
+    vmin = sorted(powers)[-len(powers) // 4]
+    vmax = np.max(powers)
+    norm = mpl.colors.LogNorm(vmin=vmin, vmax=vmax, clip=True)
+    cmap = mpl.cm.binary
+
+    # _, ax = plt.subplots()
+    # ax.scatter(
+    #     offsets,
+    #     frequencies,
+    #     c=powers,
+    #     norm=norm,
+    #     cmap="binary",
+    #     marker="_",
+    # )
+    for pow, frequency, offset, window_length in zip(
+        powers, frequencies, offsets, window_lengths
+    ):
+        plt.plot(
+            [offset, offset + window_length],
+            [frequency, frequency],
+            color=cmap(norm(pow)),
+        )
     plt.show()
 
 
@@ -153,21 +209,23 @@ def to_wav(signal, filename="temp", sample_rate=44100, dir="./data/output"):
     sf.write(f"{dir}/{filename}.wav", signal.real, sample_rate)
 
 
-signal, sample_rate = from_file("loop")
-start = 0
-length = (len(signal) // 2) * 2  # N must be a multiple of 2
-cs = signal[start : start + length]
-
-window_size = 2048
-start = perf_counter()
-result = drs(cs, window_size)
-print(perf_counter() - start)
-
-recon = []
-for dzs, dzs_rev, offset, window_length in result:
-    r = reconstruction(dzs, dzs_rev, window_size)
-    recon += r.tolist()
-
-plt.plot(cs)
-plt.plot(recon)
-plt.show()
+# signal, sample_rate = from_file("zero")
+# start = 0
+# length = (len(signal) // 2) * 2  # N must be a multiple of 2
+# cs = signal[start : start + length]
+#
+# window_size = 1024
+# start = perf_counter()
+# result = drs(cs, window_size)
+# print(perf_counter() - start)
+#
+# recon = []
+# for dzs, dzs_rev, offset, window_length in result:
+#     r = reconstruction(dzs, dzs_rev, window_size)
+#     recon += r.tolist()
+#
+# plt.plot(cs)
+# plt.plot(recon)
+# plt.show()
+#
+# plot_drs(result, sample_rate)
