@@ -78,14 +78,10 @@ def decay(ws):
     return np.imag(ws)
 
 
-def power(dzs, window_length):
+def power(dzs, window_size):
     d, z = np.unstack(dzs)
-    d2, z2, n = np.abs(d) ** 2, np.abs(z) ** 2, window_length
+    d2, z2, n = np.abs(d) ** 2, np.abs(z) ** 2, window_size
     return (d2 / n) * ((z2**n - 1) / (z2 - 1)) / n
-    # Fast version is numerically unstable, resulting in NaNs
-    # d2, z2, N = self.amplitude ** 2, abs(self.z) ** 2, self.N
-    # return (d2 / N) * ((z2 ** N - 1) / (z2 - 1))
-    # return np.sum(np.absolute(self.reconstruction) ** 2) / self.N
 
 
 def mirror(dzs, N):
@@ -105,28 +101,27 @@ def reconstruction(dzs, dzs_rev, N):
     return cs + np.flip(cs_rev)
 
 
-def drs(cs, window_length):
-    assert cs.size % 2 == 0
-    assert window_length % 2 == 0
-    num_windows = cs.size // window_length
-    result = []
-    for n in range(num_windows):
-        offset = n * window_length
-        signal = cs[offset : offset + window_length]
-        dzs = fpt(signal)
-        dzs_rev = fpt(np.flip(signal))
-        result.append((dzs, dzs_rev, offset, window_length))
-    offset = num_windows * window_length
-    remains = cs[offset:]
-    dzs = fpt(remains)
-    dzs_rev = fpt(np.flip(remains))
-    result.append((dzs, dzs_rev, offset, window_length))
-    return result
+def chunk_every(cs, window_size, step_size=None):
+    step_size = step_size or window_size
+    return [
+        (offset, cs[offset : offset + window_size])
+        for offset in range(0, len(cs), step_size)
+        if offset + window_size <= len(cs)
+    ]
 
 
-def spectral_params(dzs, dzs_rev, window_length, sample_rate):
+def drs(cs, window_size, step_size=None):
+    assert window_size % 2 == 0
+
+    return [
+        (fpt(signal), fpt(np.flip(signal)), offset, window_size)
+        for offset, signal in chunk_every(cs, window_size, step_size)
+    ]
+
+
+def spectral_params(dzs, dzs_rev, window_size, sample_rate):
     ds_in, zs_in = np.unstack(dzs)
-    ds_out, zs_out = np.unstack(mirror(dzs_rev, window_length))
+    ds_out, zs_out = np.unstack(mirror(dzs_rev, window_size))
 
     ws_in = resonant_frequencies(zs_in, sample_rate)
     ws_out = resonant_frequencies(zs_out, sample_rate)
@@ -137,63 +132,39 @@ def spectral_params(dzs, dzs_rev, window_length, sample_rate):
     return np.stack((amplitude(ds), phase(ds), frequency(ws), decay(ws)))
 
 
-def plot_drs(spectrogram, sample_rate):
+def plot_drs(spectrogram, sample_rate, ylim=None):
 
-    powers = []
-    amplitudes = []
-    phases = []
-    frequencies = []
-    decays = []
-    offsets = []
-    window_lengths = []
-
-    for dzs, dzs_rev, offset, window_length in spectrogram:
-        amplitudes_, phases_, frequencies_, decays_ = np.unstack(
-            spectral_params(dzs, dzs_rev, window_length, sample_rate)
-        )
-        ps_in = power(dzs, window_length)
-        ps_out = power(dzs_rev, window_length)
-        powers_ = np.concatenate((ps_in, ps_out))
-
-        powers += powers_.tolist()
-        amplitudes += amplitudes_.tolist()
-        phases += phases_.tolist()
-        frequencies += frequencies_.tolist()
-        decays += decays_.tolist()
-        offsets += [offset] * len(amplitudes_)
-        window_lengths += [window_length] * len(amplitudes_)
-
-    frequencies = np.array(frequencies)
-    powers = np.array(powers)[frequencies >= 0]
-    amplitudes = np.array(amplitudes)[frequencies >= 0]
-    phases = np.array(phases)[frequencies >= 0]
-    decays = np.array(decays)[frequencies >= 0]
-    offsets = np.array(offsets)[frequencies >= 0] / sample_rate
-    window_lengths = np.array(window_lengths)[frequencies >= 0] / sample_rate
-    frequencies = frequencies[frequencies >= 0]
-
-    vmin = sorted(powers)[-len(powers) // 4]
-    vmax = np.max(powers)
+    powers = sorted(
+        [
+            pow
+            for dzs, _, _, window_size in spectrogram
+            for pow in power(dzs, window_size)
+        ]
+        + [
+            pow
+            for _, dzs_rev, _, window_size in spectrogram
+            for pow in power(dzs_rev, window_size)
+        ]
+    )
+    vmin = powers[-len(powers) // 4]
+    vmax = powers[-1]
     norm = mpl.colors.LogNorm(vmin=vmin, vmax=vmax, clip=True)
     cmap = mpl.cm.binary
 
-    # _, ax = plt.subplots()
-    # ax.scatter(
-    #     offsets,
-    #     frequencies,
-    #     c=powers,
-    #     norm=norm,
-    #     cmap="binary",
-    #     marker="_",
-    # )
-    for pow, frequency, offset, window_length in zip(
-        powers, frequencies, offsets, window_lengths
-    ):
-        plt.plot(
-            [offset, offset + window_length],
-            [frequency, frequency],
-            color=cmap(norm(pow)),
-        )
+    for dzs, dzs_rev, offset, window_size in spectrogram:
+        _, z = np.unstack(dzs)
+        _, z_rev = np.unstack(dzs_rev)
+        zs = np.concatenate((z, z_rev))
+        frequencies = np.real(resonant_frequencies(zs, sample_rate))
+        powers = np.concatenate((power(dzs, window_size), power(dzs_rev, window_size)))
+        for frequency, pow in zip(frequencies, powers):
+            plt.plot(
+                [offset, offset + window_size],
+                [frequency, frequency],
+                color=cmap(norm(pow)),
+            )
+    if ylim is not None:
+        plt.ylim(ylim)
     plt.show()
 
 
@@ -209,23 +180,19 @@ def to_wav(signal, filename="temp", sample_rate=44100, dir="./data/output"):
     sf.write(f"{dir}/{filename}.wav", signal.real, sample_rate)
 
 
-# signal, sample_rate = from_file("zero")
-# start = 0
-# length = (len(signal) // 2) * 2  # N must be a multiple of 2
-# cs = signal[start : start + length]
-#
-# window_size = 1024
-# start = perf_counter()
-# result = drs(cs, window_size)
-# print(perf_counter() - start)
-#
-# recon = []
-# for dzs, dzs_rev, offset, window_length in result:
-#     r = reconstruction(dzs, dzs_rev, window_size)
-#     recon += r.tolist()
-#
-# plt.plot(cs)
-# plt.plot(recon)
-# plt.show()
-#
-# plot_drs(result, sample_rate)
+def run(window_size, step_size):
+    signal, sample_rate = from_file("zero")
+    start = 0
+    length = (len(signal) // 2) * 2  # N must be a multiple of 2
+    cs = signal[start : start + length]
+
+    start = perf_counter()
+    result = drs(cs, window_size, step_size)
+    print(perf_counter() - start)
+
+    # recon = []
+    # for dzs, dzs_rev, offset, window_size in result:
+    #     r = reconstruction(dzs, dzs_rev, window_size)
+    #     recon += r.tolist()
+
+    plot_drs(result, sample_rate, ylim=(0, 5000))
