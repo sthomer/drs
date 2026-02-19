@@ -9,6 +9,30 @@ import soundfile as sf
 import eiscor
 
 
+def fit_q_matpoly(s, K):
+    A = np.block([s[k : k + K] for k in range(K)])
+    b = s[K : 2 * K]
+    Qs = la.lstsq(A, b)
+    if Qs is not None:
+        return Qs[0].T
+    else:
+        raise la.LinAlgError
+
+
+def polyeig(Q, K, D):
+    S = np.block(
+        [[Q[D:], np.eye(D)], [-np.eye(D * (K - 1)), np.zeros((D * (K - 1), D))]]
+    )
+    T = np.block(
+        [
+            [Q[:D], np.zeros((D, D * (K - 1)))],
+            [np.zeros((D * (K - 1), D)), np.eye(D * (K - 1))],
+        ]
+    )
+    w, v = la.eig(S, T)
+    return w, vl, vr
+
+
 def fit_q_poly(cs, K):
     try:
         q = la.solve_toeplitz((cs[K : 2 * K], np.flip(cs[1 : K + 1])), -cs[:K])
@@ -182,13 +206,14 @@ def to_wav(signal, filename="temp", sample_rate=44100, dir="./data/output"):
 
 def run(window_size, step_size):
     signal, sample_rate = from_file("zero")
-    start = 0
-    length = (len(signal) // 2) * 2  # N must be a multiple of 2
+    start = 1000
+    length = 1000  # (len(signal) // 2) * 2  # N must be a multiple of 2
     cs = signal[start : start + length]
 
     start = perf_counter()
     result = drs(cs, window_size, step_size)
     print(perf_counter() - start)
+    print(result)
 
     # recon = []
     # for dzs, dzs_rev, offset, window_size in result:
