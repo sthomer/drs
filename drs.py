@@ -1,6 +1,7 @@
+import csv
 from time import perf_counter
 
-import matplotlib as mpl
+import matplotlib.colors
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.linalg as la
@@ -9,8 +10,12 @@ import soundfile as sf
 import eiscor
 
 
+def hankel(s, K):
+    return np.block([s[k : k + K] for k in range(K)])
+
+
 def fit_q_matpoly(s, K):
-    A = np.block([s[k : k + K] for k in range(K)])
+    A = hankel(s, K)
     b = s[K : 2 * K]
     Qs = la.lstsq(A, b)
     if Qs is not None:
@@ -19,18 +24,13 @@ def fit_q_matpoly(s, K):
         raise la.LinAlgError
 
 
+def companion(Q, K, D):
+    return np.block([[np.zeros((D * (K - 1), D)), np.eye(D * (K - 1))], [Q]])
+
+
 def polyeig(Q, K, D):
-    S = np.block(
-        [[Q[D:], np.eye(D)], [-np.eye(D * (K - 1)), np.zeros((D * (K - 1), D))]]
-    )
-    T = np.block(
-        [
-            [Q[:D], np.zeros((D, D * (K - 1)))],
-            [np.zeros((D * (K - 1), D)), np.eye(D * (K - 1))],
-        ]
-    )
-    w, v = la.eig(S, T)
-    return w, vl, vr
+    wv = la.eig(companion(Q, K, D), right=True)
+    return wv[0], wv[1][:D]
 
 
 def fit_q_poly(cs, K):
@@ -172,8 +172,8 @@ def plot_drs(spectrogram, sample_rate, ylim=None):
     )
     vmin = powers[-len(powers) // 4]
     vmax = powers[-1]
-    norm = mpl.colors.LogNorm(vmin=vmin, vmax=vmax, clip=True)
-    cmap = mpl.cm.binary
+    norm = matplotlib.colors.LogNorm(vmin=vmin, vmax=vmax, clip=True)
+    cmap = plt.get_cmap("binary")
 
     for dzs, dzs_rev, offset, window_size in spectrogram:
         _, z = np.unstack(dzs)
@@ -192,10 +192,10 @@ def plot_drs(spectrogram, sample_rate, ylim=None):
     plt.show()
 
 
-def from_file(filename, dir="./data/input", filetype="wav"):
+def from_file(filename, dir="./data/input", filetype="wav", mono=True):
     file_in = f"{dir}/{filename}.{filetype}"
     signal, sample_rate = sf.read(file_in)
-    if len(signal.shape) > 1:
+    if mono and len(signal.shape) > 1:
         signal = signal[:, 0]  # turn stereo into mono
     return signal, sample_rate
 
@@ -204,20 +204,52 @@ def to_wav(signal, filename="temp", sample_rate=44100, dir="./data/output"):
     sf.write(f"{dir}/{filename}.wav", signal.real, sample_rate)
 
 
+def to_csv(spectrogram, sample_rate, filename="temp", dir="./data/output"):
+    print("Writing csv...", end="")
+    with open(f"{dir}/{filename}.csv", "w", newline="") as file:
+        writer = csv.writer(file)
+
+        row = (
+            "onset",
+            "duration",
+            "sample_rate",
+            "amplitude",
+            "phase",
+            "frequency",
+            "decay",
+        )
+        writer.writerow(row)
+
+        for dzs, dzs_rev, offset, window_size in spectrogram:
+            params = spectral_params(dzs, dzs_rev, window_size, sample_rate)
+            for amplitude, phase, frequency, decay in zip(*np.unstack(params)):
+                row = (
+                    offset,
+                    window_size,
+                    sample_rate,
+                    amplitude,
+                    phase,
+                    frequency,
+                    decay,
+                )
+                writer.writerow(row)
+    print("Done.")
+
+
 def run(window_size, step_size):
     signal, sample_rate = from_file("zero")
-    start = 1000
-    length = 1000  # (len(signal) // 2) * 2  # N must be a multiple of 2
+    start = 0
+    length = (len(signal) // 2) * 2  # N must be a multiple of 2
     cs = signal[start : start + length]
 
     start = perf_counter()
     result = drs(cs, window_size, step_size)
     print(perf_counter() - start)
-    print(result)
+    to_csv(result, sample_rate)
 
     # recon = []
     # for dzs, dzs_rev, offset, window_size in result:
     #     r = reconstruction(dzs, dzs_rev, window_size)
     #     recon += r.tolist()
 
-    plot_drs(result, sample_rate, ylim=(0, 5000))
+    # plot_drs(result, sample_rate, ylim=(0, 5000))
