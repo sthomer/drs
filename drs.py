@@ -1,3 +1,4 @@
+import argparse
 import csv
 from time import perf_counter
 
@@ -236,8 +237,8 @@ def to_csv(spectrogram, sample_rate, filename="temp", dir="./data/output"):
     print("Done.")
 
 
-def run(window_size, step_size):
-    signal, sample_rate = from_file("zero")
+def run(window_size, step_size, source_filename="zero", dest_filename="temp"):
+    signal, sample_rate = from_file(source_filename)
     start = 0
     length = (len(signal) // 2) * 2  # N must be a multiple of 2
     cs = signal[start : start + length]
@@ -245,11 +246,23 @@ def run(window_size, step_size):
     start = perf_counter()
     result = drs(cs, window_size, step_size)
     print(perf_counter() - start)
-    to_csv(result, sample_rate)
+    to_csv(result, sample_rate, filename=dest_filename)
 
-    # recon = []
-    # for dzs, dzs_rev, offset, window_size in result:
-    #     r = reconstruction(dzs, dzs_rev, window_size)
-    #     recon += r.tolist()
+    recon = []
+    for dzs, dzs_rev, offset, window_size in result:
+        r = reconstruction(dzs, dzs_rev, window_size)
+        recon += r.tolist()
 
-    # plot_drs(result, sample_rate, ylim=(0, 5000))
+    # to_wav(recon, filename=dest_filename, sample_rate=sample_rate)
+    plot_drs(result, sample_rate, ylim=(0, 5000))
+
+if __name__ == "__main__":
+    ap = argparse.ArgumentParser(description="Calculate Discrete Resonance Spectrogram", prog="drs")
+    ap.add_argument('--window-size', type=int, default=2048, help='Size of the analysis window (must be a multiple of 2)')
+    ap.add_argument('--step-size', type=int, default=None, help='Step size for moving the analysis window (defaults to window size)')
+    ap.add_argument('--source', type=str, default="zero", help='Name of the input wave file, located in ./data/input')
+    ap.add_argument('--destination', type=str, default=None, help='Name of the output file, located in ./data/output')
+    args = ap.parse_args()
+
+    dest_filename = args.destination if args.destination is not None else (args.source if args.source else "temp")
+    run(args.window_size, args.step_size, source_filename=args.source, dest_filename=dest_filename)
