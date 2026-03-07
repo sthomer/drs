@@ -4,7 +4,7 @@
 
 - Install directly from the git repo:
     - `pip install git+https://github.com/sthomer/drs.git`
-- Install from our a local copy (git clone)
+- Install from a local copy (git clone)
     - `pip install /path/to/drs`
 
 ## Usage
