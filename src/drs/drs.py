@@ -1,3 +1,11 @@
+try:
+    from . import _eiscor_ext
+except ImportError as e:
+    raise ImportError(
+        "The compiled extension '_eiscor_ext' could not be imported. "
+        "Reinstall the package with: python -m pip install --no-build-isolation -e ."
+    ) from e
+
 import csv
 from time import perf_counter
 
@@ -6,9 +14,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scipy.linalg as la
 import soundfile as sf
-
-import eiscor
-
 
 def hankel(s, K):
     return np.block([s[k : k + K] for k in range(K)])
@@ -58,7 +63,7 @@ def poly_roots(qs):
     zs_ = np.zeros(qs.size - 1, dtype=np.complex128, order="F")
     rs_ = np.zeros(qs.size - 1, dtype=np.float64, order="F")
     i_ = np.array(0)
-    eiscor.z_poly_roots(qs_, zs_, rs_, i_)
+    _eiscor_ext.z_poly_roots(qs_, zs_, rs_, i_)
     return np.ascontiguousarray(zs_)
 
 

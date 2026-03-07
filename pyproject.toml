@@ -1,0 +1,20 @@
+[build-system]
+requires = [
+  "meson-python",
+  "meson",
+  "ninja",
+  "numpy"
+]
+build-backend = "mesonpy"
+
+[project]
+name = "drs"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy",
+  "scipy",
+  "matplotlib",
+  "pyyaml",
+  "soundfile"
+]
