@@ -10,6 +10,7 @@ except ImportError as e:
 import numpy as np
 import scipy.linalg as la
 
+
 def hankel(s, K):
     return np.block([s[k : k + K] for k in range(K)])
 
@@ -154,3 +155,37 @@ def spectral_params(dzs, dzs_rev, window_size, sample_rate):
     ws = np.concatenate((ws_in, ws_out))
 
     return np.stack((amplitude(ds), phase(ds), frequency(ws), decay(ws)))
+
+
+def rs_ip(dzs_a, dzs_b, sample_rate):
+    ds_a, zs_a = np.unstack(dzs_a)
+    ws_a = resonant_frequencies(zs_a, sample_rate)
+    dj = ds_a[:, np.newaxis]
+    wj = ws_a[:, np.newaxis]
+
+    ds_b, zs_b = np.unstack(dzs_b)
+    ws_b = resonant_frequencies(zs_b, sample_rate)
+    dk = ds_b[np.newaxis, :]
+    wk = ws_b[np.newaxis, :]
+
+    return 1j * np.sum((np.conj(dj) @ dk) / (np.conj(wj) - wk))
+
+
+def rs_cos_sim(dzs_a, dzs_rev_a, dzs_b, dzs_rev_b, sample_rate):
+
+    ip_ab = rs_ip(dzs_a, dzs_b, sample_rate)
+    ip_ab_rev = rs_ip(dzs_rev_a, dzs_rev_b, sample_rate)
+    top = np.real(ip_ab + ip_ab_rev)
+
+    normsq_a = rs_ip(dzs_a, dzs_a, sample_rate)
+    normsq_a_rev = rs_ip(dzs_rev_a, dzs_rev_a, sample_rate)
+    normsq_b = rs_ip(dzs_b, dzs_b, sample_rate)
+    normsq_b_rev = rs_ip(dzs_rev_b, dzs_rev_b, sample_rate)
+    bot = np.sqrt(normsq_a + normsq_a_rev) * np.sqrt(normsq_b + normsq_b_rev)
+
+    return top / bot
+
+
+def rs_cos_dist(dzs_a, dzs_rev_a, dzs_b, dzs_rev_b, sample_rate):
+    sim = rs_cos_sim(dzs_a, dzs_rev_a, dzs_b, dzs_rev_b, sample_rate)
+    return np.sqrt(2 * (1 - sim))

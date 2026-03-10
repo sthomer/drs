@@ -16,5 +16,6 @@ dependencies = [
   "scipy",
   "matplotlib",
   "pyyaml",
-  "soundfile"
+  "soundfile",
+  "ipython>=9.11.0",
 ]
