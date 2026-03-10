@@ -157,7 +157,58 @@ def spectral_params(dzs, dzs_rev, window_size, sample_rate):
     return np.stack((amplitude(ds), phase(ds), frequency(ws), decay(ws)))
 
 
-def rs_ip(dzs_a, dzs_b, sample_rate):
+def inner_product(dzs_a, dzs_b, sample_rate):
+    """
+    Compute the inner product between two resonance spectra
+    $\\langle \\sigma_a \\mid \\sigma_b \\rangle$,
+    where both resonance spectra consist of
+    only damping resonance or only ramping resonances.
+
+    Parameters
+    ----------
+    dzs_a : ndarray, shape(2, J)
+        Resonances of the resonance spectrum in the first argument,
+        where the first row contains the resonant amplitudes
+        and the second row contains the correspond poles.
+    dzs_b : ndarray, shape(2, K)
+        Resonances of the resonance spectrum in the second argument,
+        where the first row contains the resonant amplitudes
+        and the second row contains the correspond poles.
+    sample_rate : float
+        Sample rate associated with the resonance spectrum.
+
+    Returns
+    -------
+    complex
+        Inner product between the resonance spectra.
+
+    See Also
+    --------
+    cosine_similarity
+    cosine_distance
+
+    Notes
+    -----
+    You must not compare damping resonances and ramping resonances!
+
+    Examples
+    --------
+    Compute the resonance spectrum inner product
+    between a signal and itself additive noise.
+
+    >>> import numpy as np
+    >>> from drs.io import from_wav
+    >>> from drs.core import fpt, rs_ip
+    >>> signal, sample_rate = from_wav("data/raw/zero.wav")
+    >>> signal_a = signal[1024:2048]
+    >>> signal_b = signal_a + np.random.normal(0, 0.01, len(signal_a))
+    >>> dzs_a, dzs_rev_a = fpt(signal_a), fpt(np.flip(signal_a))
+    >>> dzs_b, dzs_rev_b = fpt(signal_b), fpt(np.flip(signal_b))
+    >>> ip_ab = rs_ip(dzs_a, dzs_b, dzs_rev_b, sample_rate)
+    >>> ip_ab_rev = rs_ip(dzs_rev_a, dzs_rev_b, sample_rate)
+    >>> ip_ab + ip_ab_rev
+    """
+
     ds_a, zs_a = np.unstack(dzs_a)
     ws_a = resonant_frequencies(zs_a, sample_rate)
     dj = ds_a[:, np.newaxis]
@@ -171,21 +222,118 @@ def rs_ip(dzs_a, dzs_b, sample_rate):
     return 1j * np.sum((np.conj(dj) @ dk) / (np.conj(wj) - wk))
 
 
-def rs_cos_sim(dzs_a, dzs_rev_a, dzs_b, dzs_rev_b, sample_rate):
+def cosine_similarity(dzs_a, dzs_rev_a, dzs_b, dzs_rev_b, sample_rate):
+    """
+    Compute the cosine similarity between two resonance spectra
+    $s_c(\\sigma_a, \\sigma_b)$.
 
-    ip_ab = rs_ip(dzs_a, dzs_b, sample_rate)
-    ip_ab_rev = rs_ip(dzs_rev_a, dzs_rev_b, sample_rate)
+    Parameters
+    ----------
+    dzs_a : ndarray, shape(2, J_damping)
+        Damping resonances of the resonance spectrum in the first argument,
+        where the first row contains the resonant amplitudes
+        and the second row contains the correspond poles.
+    dzs_rev_a : ndarray, shape (2, J_ramping)
+        Ramping resonances of the resonance spectrum in the first argument,
+        where the first row contains the resonant amplitudes
+        and the second row contains the correspond poles.
+    dzs_a : ndarray, shape(2, K_damping)
+        Damping resonances of the resonance spectrum in the second argument,
+        where the first row contains the resonant amplitudes
+        and the second row contains the correspond poles.
+    dzs_rev_a : ndarray, shape (2, K_ramping)
+        Ramping resonances of the resonance spectrum in the second argument,
+        where the first row contains the resonant amplitudes
+        and the second row contains the correspond poles.
+    sample_rate : float
+        Sample rate associated with the resonance spectrum.
+
+    Returns
+    -------
+    float
+        Cosine similarity ranging from -1 to 1.
+
+    See Also
+    --------
+    inner_product
+    cosine_distance
+
+    Examples
+    --------
+    Compute the cosine similarity between a signal and itself additive noise.
+
+    >>> import numpy as np
+    >>> from drs.io import from_wav
+    >>> from drs.core import fpt, rs_cos_sim
+    >>> signal, sample_rate = from_wav("data/raw/zero.wav")
+    >>> signal_a = signal[1024:2048]
+    >>> signal_b = signal_a + np.random.normal(0, 0.01, len(signal_a))
+    >>> dzs_a, dzs_rev_a = fpt(signal_a), fpt(np.flip(signal_a))
+    >>> dzs_b, dzs_rev_b = fpt(signal_b), fpt(np.flip(signal_b))
+    >>> cosine_similarity(dzs_a, dzs_rev_a, dzs_b, dzs_rev_b, sample_rate)
+    """
+
+    ip_ab = inner_product(dzs_a, dzs_b, sample_rate)
+    ip_ab_rev = inner_product(dzs_rev_a, dzs_rev_b, sample_rate)
     top = np.real(ip_ab + ip_ab_rev)
 
-    normsq_a = rs_ip(dzs_a, dzs_a, sample_rate)
-    normsq_a_rev = rs_ip(dzs_rev_a, dzs_rev_a, sample_rate)
-    normsq_b = rs_ip(dzs_b, dzs_b, sample_rate)
-    normsq_b_rev = rs_ip(dzs_rev_b, dzs_rev_b, sample_rate)
+    normsq_a = inner_product(dzs_a, dzs_a, sample_rate)
+    normsq_a_rev = inner_product(dzs_rev_a, dzs_rev_a, sample_rate)
+    normsq_b = inner_product(dzs_b, dzs_b, sample_rate)
+    normsq_b_rev = inner_product(dzs_rev_b, dzs_rev_b, sample_rate)
     bot = np.sqrt(normsq_a + normsq_a_rev) * np.sqrt(normsq_b + normsq_b_rev)
 
-    return top / bot
+    return np.real(top / bot)
 
 
-def rs_cos_dist(dzs_a, dzs_rev_a, dzs_b, dzs_rev_b, sample_rate):
-    sim = rs_cos_sim(dzs_a, dzs_rev_a, dzs_b, dzs_rev_b, sample_rate)
+def cosine_distance(dzs_a, dzs_rev_a, dzs_b, dzs_rev_b, sample_rate):
+    """
+    Compute the cosine distance between two resonance spectra
+    $d_c(\\sigma_a, \\sigma_b)$.
+
+    Parameters
+    ----------
+    dzs_a : ndarray, shape(2, J_damping)
+        Damping resonances of the resonance spectrum in the first argument,
+        where the first row contains the resonant amplitudes
+        and the second row contains the correspond poles.
+    dzs_rev_a : ndarray, shape (2, J_ramping)
+        Ramping resonances of the resonance spectrum in the first argument,
+        where the first row contains the resonant amplitudes
+        and the second row contains the correspond poles.
+    dzs_a : ndarray, shape(2, K_damping)
+        Damping resonances of the resonance spectrum in the second argument,
+        where the first row contains the resonant amplitudes
+        and the second row contains the correspond poles.
+    dzs_rev_a : ndarray, shape (2, K_ramping)
+        Ramping resonances of the resonance spectrum in the second argument,
+        where the first row contains the resonant amplitudes
+        and the second row contains the correspond poles.
+    sample_rate : float
+        Sample rate associated with the resonance spectrum.
+
+    Returns
+    -------
+    float
+        Cosine distance ranging from 0 to 2.
+
+    See Also
+    --------
+    inner_product
+    cosine_similarity
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from drs.io import from_wav
+    >>> from drs.core import fpt, rs_cos_dist
+    >>> signal, sample_rate = from_wav("data/raw/zero.wav")
+    >>> signal_a = signal[1024:2048]
+    >>> signal_b = signal_a + np.random.normal(0, 0.01, len(signal_a))
+    >>> dzs_a, dzs_rev_a = fpt(signal_a), fpt(np.flip(signal_a))
+    >>> dzs_b, dzs_rev_b = fpt(signal_b), fpt(np.flip(signal_b))
+    >>> cosine_distance(dzs_a, dzs_rev_a, dzs_b, dzs_rev_b, sample_rate)
+    """
+
+    sim = cosine_similarity(dzs_a, dzs_rev_a, dzs_b, dzs_rev_b, sample_rate)
     return np.sqrt(2 * (1 - sim))
