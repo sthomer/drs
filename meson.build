@@ -16,7 +16,12 @@ subdir('fortran')
 py.install_sources(
   [
     'src/drs/__init__.py',
-    'src/drs/drs.py',
+    'src/drs/core.py',
+    'src/drs/io.py',
+    'src/drs/config.py',
+    'src/drs/analysis.py',
+    'src/drs/preprocessing.py',
+    'src/drs/plotting.py',
   ],
   subdir: 'drs'
 )

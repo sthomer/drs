@@ -1,0 +1,20 @@
+project_name: drs
+
+paths:
+  raw_data: data/raw/zero.wav
+  processed_data: data/processed/zero_processed.wav
+  output_dir: outputs/runs
+
+preprocessing:
+  normalize: true
+  offset: 0
+  duration: 1024
+
+analysis:
+  window_size: 1024
+  step_size: 1024
+  degree: 512
+
+plotting:
+  plot_drs: true
+  plot_reconstruction: true

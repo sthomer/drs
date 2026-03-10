@@ -6,14 +6,9 @@ except ImportError as e:
         "Reinstall the package with: python -m pip install --no-build-isolation -e ."
     ) from e
 
-import csv
-from time import perf_counter
 
-import matplotlib.colors
-import matplotlib.pyplot as plt
 import numpy as np
 import scipy.linalg as la
-import soundfile as sf
 
 def hankel(s, K):
     return np.block([s[k : k + K] for k in range(K)])
@@ -159,102 +154,3 @@ def spectral_params(dzs, dzs_rev, window_size, sample_rate):
     ws = np.concatenate((ws_in, ws_out))
 
     return np.stack((amplitude(ds), phase(ds), frequency(ws), decay(ws)))
-
-
-def plot_drs(spectrogram, sample_rate, ylim=None):
-
-    powers = sorted(
-        [
-            pow
-            for dzs, _, _, window_size in spectrogram
-            for pow in power(dzs, window_size)
-        ]
-        + [
-            pow
-            for _, dzs_rev, _, window_size in spectrogram
-            for pow in power(dzs_rev, window_size)
-        ]
-    )
-    vmin = powers[-len(powers) // 4]
-    vmax = powers[-1]
-    norm = matplotlib.colors.LogNorm(vmin=vmin, vmax=vmax, clip=True)
-    cmap = plt.get_cmap("binary")
-
-    for dzs, dzs_rev, offset, window_size in spectrogram:
-        _, z = np.unstack(dzs)
-        _, z_rev = np.unstack(dzs_rev)
-        zs = np.concatenate((z, z_rev))
-        frequencies = np.real(resonant_frequencies(zs, sample_rate))
-        powers = np.concatenate((power(dzs, window_size), power(dzs_rev, window_size)))
-        for frequency, pow in zip(frequencies, powers):
-            plt.plot(
-                [offset, offset + window_size],
-                [frequency, frequency],
-                color=cmap(norm(pow)),
-            )
-    if ylim is not None:
-        plt.ylim(ylim)
-    plt.show()
-
-
-def from_file(filename, dir="./data/input", filetype="wav", mono=True):
-    file_in = f"{dir}/{filename}.{filetype}"
-    signal, sample_rate = sf.read(file_in)
-    if mono and len(signal.shape) > 1:
-        signal = signal[:, 0]  # turn stereo into mono
-    return signal, sample_rate
-
-
-def to_wav(signal, filename="temp", sample_rate=44100, dir="./data/output"):
-    sf.write(f"{dir}/{filename}.wav", signal.real, sample_rate)
-
-
-def to_csv(spectrogram, sample_rate, filename="temp", dir="./data/output"):
-    print("Writing csv...", end="")
-    with open(f"{dir}/{filename}.csv", "w", newline="") as file:
-        writer = csv.writer(file)
-
-        row = (
-            "onset",
-            "duration",
-            "sample_rate",
-            "amplitude",
-            "phase",
-            "frequency",
-            "decay",
-        )
-        writer.writerow(row)
-
-        for dzs, dzs_rev, offset, window_size in spectrogram:
-            params = spectral_params(dzs, dzs_rev, window_size, sample_rate)
-            for amplitude, phase, frequency, decay in zip(*np.unstack(params)):
-                row = (
-                    offset,
-                    window_size,
-                    sample_rate,
-                    amplitude,
-                    phase,
-                    frequency,
-                    decay,
-                )
-                writer.writerow(row)
-    print("Done.")
-
-
-def run(window_size, step_size):
-    signal, sample_rate = from_file("zero")
-    start = 0
-    length = (len(signal) // 2) * 2  # N must be a multiple of 2
-    cs = signal[start : start + length]
-
-    start = perf_counter()
-    result = drs(cs, window_size, step_size)
-    print(perf_counter() - start)
-    to_csv(result, sample_rate)
-
-    # recon = []
-    # for dzs, dzs_rev, offset, window_size in result:
-    #     r = reconstruction(dzs, dzs_rev, window_size)
-    #     recon += r.tolist()
-
-    # plot_drs(result, sample_rate, ylim=(0, 5000))
