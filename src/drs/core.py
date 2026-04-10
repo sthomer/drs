@@ -10,14 +10,44 @@ except ImportError as e:
 import numpy as np
 import scipy.linalg as la
 
-
 def hankel(s, K):
-    return np.block([s[k : k + K] for k in range(K)])
+    """
+    Construct a Hankel matrix for a linear recurrence.
+
+    Parameters
+    ----------
+    s : ndarray, shape(N, M)
+        Sequence of vectors of length M
+    K : int
+        Order of the linear recurrence.
+
+    Returns
+    -------
+    ndarray, shape(M*K, N-K)
+        Hankel matrix
+    """
+    N, M = s.shape
+    return np.block([s[k : k + K] for k in range(N-K)])
 
 
 def fit_q_matpoly(s, K):
+    """
+    Solve for the coefficients of a linear recurrence.
+
+    Parameters
+    ----------
+    s : ndarray, shape(M, N)
+        Sequence of vectors of length M
+    K : int
+        Order of the linear recurrence
+
+    Returns
+    -------
+    ndarray, shape(M, M*K)
+        Matrix coefficients as a block "row vector"
+    """
     A = hankel(s, K)
-    b = s[K : 2 * K]
+    b = s[K:]
     Qs = la.lstsq(A, b)
     if Qs is not None:
         return Qs[0].T
@@ -25,13 +55,73 @@ def fit_q_matpoly(s, K):
         raise la.LinAlgError
 
 
-def companion(Q, K, D):
-    return np.block([[np.zeros((D * (K - 1), D)), np.eye(D * (K - 1))], [Q]])
+def companion(Q, K, M):
+    """
+    Construct the Frobenius companion matrix for a monic matrix polynomial.
+
+    Parameters
+    ----------
+    Q : ndarray, shape(M, M*K)
+        Matrix coefficients as a block "row vector"
+    K : int
+        Order of the linear recurrence
+    M : int
+        Dimension of vector signal
+
+    Returns
+    -------
+    ndarray, shape(M*K, M*K)
+        Frobenius companion matrix
+    """
+    return np.block([[np.zeros((M * (K - 1), M)), np.eye(M * (K - 1))], [Q]])
 
 
-def polyeig(Q, K, D):
-    wv = la.eig(companion(Q, K, D), right=True)
-    return wv[0], wv[1][:D]
+def polyeig(Q, K, M):
+    """
+    Solve polynomial eigenvalue problem for a monic matrix polynomial.
+
+    Parameters
+    ----------
+    Q : ndarray, shape(M, M*K)
+        Matrix coefficients as a block "row vector"
+    K : int
+        Order of the linear recurrence
+    M : int
+        Dimension of vector signal
+
+    Returns
+    -------
+    eigenvalue : ndarray, shape(M*K)
+        Vector of eigenvalues
+    eigenvectors : ndarray, shape(M, M*K)
+        Matrix of eigenvectors
+    """
+    wv = la.eig(companion(Q, K, M), right=True)
+    return wv[0], wv[1][:M]
+
+
+def coeffs(evs, s):
+    """
+    Solve for resonance vectors amplitudes.
+
+    Parameters
+    ----------
+    evs : ndarray, shape(M*K)
+        eigenvalues
+    s : ndarray, shape(M, N)
+        signal
+
+    Returns
+    -------
+    ndarray, shape(M, M*K)
+        Resonance vector amplitudes
+    """
+    M, N = s.shape
+    Ds = la.lstsq(np.vander(evs, N-1), s.T)
+    if Ds is not None:
+        return Ds[0].T
+    else:
+        raise la.LinAlgError
 
 
 def fit_q_poly(cs, K):
