@@ -23,11 +23,31 @@ def hankel(s, K):
 
     Returns
     -------
-    ndarray, shape(M*K, N-K)
+    ndarray, shape(N - K, M * K)
         Hankel matrix
     """
     N, M = s.shape
-    return np.block([s[k : k + K] for k in range(N-K)])
+    return np.block([[s[k : k + K].ravel()] for k in range(N-K)])
+
+
+def hankel_tensor(s, K):
+    """
+    Construct a Hankel tensor for a linear recurrence.
+
+    Parameters
+    ----------
+    s : ndarray, shape(N, M)
+        Sequence of vectors of length M
+    K : int
+        Order of the linear recurrence.
+
+    Returns
+    -------
+    ndarray, shape(N-K, K, M)
+        Hankel matrix
+    """
+    N = s.shape[0]
+    return np.stack([s[k : k + K] for k in range(N - K)])
 
 
 def fit_q_matpoly(s, K):
@@ -54,6 +74,32 @@ def fit_q_matpoly(s, K):
     else:
         raise la.LinAlgError
 
+def fit_q_tensor_poly(s, K):
+    """
+    Solve for the coefficients of a linear recurrence.
+
+    Parameters
+    ----------
+    s : ndarray, shape(N, M)
+        Sequence of vectors of length M
+    K : int
+        Order of the linear recurrence
+
+    Returns
+    -------
+    ndarray, shape(K, M, M)
+        Matrix coefficients as a block "row vector"
+    """
+    N, M = s.shape
+    H_ = hankel_tensor(s, K)
+    H = H_.reshape(N-K, M*K)
+    B = s[K:]
+    Q = la.lstsq(H, B)
+    if Q is not None:
+        return Q[0].reshape(K, M, M).transpose(0, 2, 1)
+    else:
+        raise la.LinAlgError
+
 
 def companion(Q, K, M):
     """
@@ -74,6 +120,25 @@ def companion(Q, K, M):
         Frobenius companion matrix
     """
     return np.block([[np.zeros((M * (K - 1), M)), np.eye(M * (K - 1))], [Q]])
+
+def companion_tensor(Q):
+    """
+    Construct the Frobenius companion tensor for a monic matrix polynomial.
+
+    Parameters
+    ----------
+    Q : ndarray, shape(K, M, M)
+        Matrix coefficients as a block "row vector"
+
+    Returns
+    -------
+    ndarray, shape(K, K, M, M)
+        Frobenius companion tensor
+    """
+    K, M, _ = Q.shape
+    Z = np.zeros((M, M))
+    I = np.eye(M)
+    return np.stack([k*[Z] + [I] + (K-k-1)*[Z] for k in range(1,K)] + [Q])
 
 
 def polyeig(Q, K, M):
@@ -99,6 +164,30 @@ def polyeig(Q, K, M):
     wv = la.eig(companion(Q, K, M), right=True)
     return wv[0], wv[1][:M]
 
+def polyeig_tensor(Q):
+    """
+    Solve polynomial eigenvalue problem for a monic matrix polynomial.
+
+    Parameters
+    ----------
+    Q : ndarray, shape(K, M, M)
+        Matrix coefficients as a block "row vector"
+
+    Returns
+    -------
+    eigenvalue : ndarray, shape(M*K)
+        Vector of eigenvalues
+    eigenvectors : ndarray, shape(M, M*K)
+        Matrix of normalized eigenvectors
+    """
+    K, M, _ = Q.shape
+    C_ = companion_tensor(Q)
+    C = C_.transpose(0,2,1,3).reshape(M*K, M*K)
+    wv = la.eig(C, right=True)
+    E, V = wv[0], wv[1][:M].T
+    X = V / la.norm(V, axis=1, keepdims=True)
+    return E, X
+  
 
 def coeffs(evs, s):
     """
@@ -108,18 +197,18 @@ def coeffs(evs, s):
     ----------
     evs : ndarray, shape(M*K)
         eigenvalues
-    s : ndarray, shape(M, N)
+    s : ndarray, shape(N, M)
         signal
 
     Returns
     -------
-    ndarray, shape(M, M*K)
+    ndarray, shape(M*K, M)
         Resonance vector amplitudes
     """
-    M, N = s.shape
-    Ds = la.lstsq(np.vander(evs, N-1), s.T)
-    if Ds is not None:
-        return Ds[0].T
+    N, M = s.shape
+    D = la.lstsq(np.vander(evs, N, increasing=True).T, s)
+    if D is not None:
+        return D[0]
     else:
         raise la.LinAlgError
 
