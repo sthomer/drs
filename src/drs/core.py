@@ -88,7 +88,7 @@ def fit_q_tensor_poly(s, K):
     Returns
     -------
     ndarray, shape(K, M, M)
-        Matrix coefficients as a block "row vector"
+        Matrix coefficients
     """
     N, M = s.shape
     H_ = hankel_tensor(s, K)
@@ -184,20 +184,22 @@ def polyeig_tensor(Q):
     C_ = companion_tensor(Q)
     C = C_.transpose(0,2,1,3).reshape(M*K, M*K)
     wv = la.eig(C, right=True)
-    E, V = wv[0], wv[1][:M].T
+    E, V = wv[0], wv[1][:M]
     X = V / la.norm(V, axis=1, keepdims=True)
     return E, X
   
 
-def coeffs(evs, s):
+def coeffs(E, X, S):
     """
     Solve for resonance vectors amplitudes.
 
     Parameters
     ----------
-    evs : ndarray, shape(M*K)
+    E : ndarray, shape(M*K)
         eigenvalues
-    s : ndarray, shape(N, M)
+    X : ndarray, shape(M, M*K)
+        eigenvectors
+    S : ndarray, shape(N, M)
         signal
 
     Returns
@@ -205,12 +207,17 @@ def coeffs(evs, s):
     ndarray, shape(M*K, M)
         Resonance vector amplitudes
     """
-    N, M = s.shape
-    D = la.lstsq(np.vander(evs, N, increasing=True).T, s)
-    if D is not None:
-        return D[0]
-    else:
-        raise la.LinAlgError
+    N, M = S.shape
+    V = np.vander(E, N, increasing=True).T
+    G = X.T @ X
+    SX = S @ X
+    D_inv = V @ la.inv(SX @ SX.T) @ SX @ G
+    return D_inv
+    # D = la.lstsq(np.vander(evs, N, increasing=True).T, s)
+    # if D is not None:
+    #     return D[0]
+    # else:
+    #     raise la.LinAlgError
 
 
 def fit_q_poly(cs, K):

@@ -18,4 +18,27 @@ dependencies = [
   "pyyaml",
   "soundfile",
   "ipython>=9.11.0",
+  "torch>=2.11.0",
+  "torchvision>=0.26.0",
+  "triton-xpu>=3.7.0 ; sys_platform == 'linux'",
+  "torchaudio>=2.11.0",
 ]
+
+[tool.uv.sources]
+torch = [
+  { index = "pytorch-xpu", marker = "sys_platform == 'linux'" }
+]
+torchvision = [
+  { index = "pytorch-xpu", marker = "sys_platform == 'linux'" }
+]
+torchaudio = [
+  { index = "pytorch-xpu", marker = "sys_platform == 'linux'" }
+]
+triton-xpu = [
+  { index = "pytorch-xpu", marker = "sys_platform == 'linux'"}
+]
+
+[[tool.uv.index]]
+name = "pytorch-xpu"
+url = "https://download.pytorch.org/whl/xpu"
+explicit = true
