@@ -115,6 +115,16 @@ def fit_q_tensor_poly(s, K):
         raise la.LinAlgError
 
 
+def fit_p_tensor_poly(s, Q):
+    K, M, _ = Q.shape
+    Z = np.zeros(M)
+    L = np.block(
+        [np.concatenate([np.zeros((K - k, M)), s[:k]]) for k in range(1, K + 1)]
+    )  # shape(K, M*K)
+    Q_ = np.concatenate((-Q.transpose(0, 2, 1).reshape(M * K, M), np.eye(M)))[M:]
+    return L @ Q_
+
+
 def companion_tensor(Q):
     """
     Construct the Frobenius companion tensor for a monic matrix polynomial.
@@ -122,7 +132,7 @@ def companion_tensor(Q):
     Parameters
     ----------
     Q : ndarray, shape(K, M, M)
-        Matrix coefficients as a block "row vector"
+        Matrix coefficients
 
     Returns
     -------
@@ -155,11 +165,26 @@ def polyeig_tensor(Q):
     C_ = companion_tensor(Q)
     C = C_.transpose(0, 2, 1, 3).reshape(M * K, M * K)
     E = torch.linalg.eigvals(torch.from_numpy(C))
-    return E
+    return E.numpy()
     # wv = la.eig(C, right=True)
     # E, V = wv[0], wv[1][:M]
     # X = V / la.norm(V, axis=1, keepdims=True)
     # return E, X
+
+
+def residue(Q, P, E):
+    J = E.shape[0]
+    K, M, _ = Q.shape
+    E_ = E.reshape(J, 1)
+    idx1 = np.arange(1, K + 1).reshape(1, K)
+    E_K1 = np.power(E_, idx1) * idx1
+    Q_E = np.sum(Q.reshape(1, K, M, M) * E_K1.reshape(J, K, 1, 1), axis=1)
+    Q_E_inv = la.inv(Q_E)
+    idx0 = np.arange(K).reshape(1, K)
+    E_K0 = np.power(E_, idx0)
+    P_E = np.sum(P.reshape(1, K, M) * E_K0.reshape(J, K, 1), axis=1)
+    D = np.einsum("ijk,ik->ij", Q_E_inv, P_E)
+    return D
 
 
 def coeffs(ls_forward, ls_backward, signal):
@@ -198,6 +223,45 @@ def coeffs(ls_forward, ls_backward, signal):
         return D[0][: len(ls_forward)], D[0][len(ls_forward) :]
     else:
         raise la.LinAlgError
+
+
+def mdfpt_residue(signal, degree):
+    """
+    Decompose a signal into its resonance basis.
+
+    If the signal has M channels and the resonance basis has degree K,
+    there are M*K resonance vectors in the decomposition
+    split between damping and ramping resonances.
+
+    Parameters
+    ----------
+    signal : ndarray, shape(N, M)
+        Signal of length N with M channels
+    degree : int
+        Degree of the underlying matrix polynomial
+
+    Returns
+    -------
+    ResonanceBasis
+        A resonance basis composed of:
+        - Initial resonant amplitude vectors for damping resonances
+        - Damping resonant frequencies (damping in forward time)
+        - Final resonance amplitude vectors for ramping resonances
+        - Ramping resonant frequencies (damping in reverse time)
+    """
+    qs_forward = fit_q_tensor_poly(signal, degree)
+    ps_forward = fit_p_tensor_poly(signal, qs_forward)
+    ls_forward = polyeig_tensor(qs_forward)
+    ls_forward = ls_forward[np.abs(ls_forward) < 1]
+    ds_forward = residue(qs_forward, ps_forward, ls_forward)
+    signal_backward = np.flipud(signal)
+    qs_backward = fit_q_tensor_poly(signal_backward, degree)
+    ps_backward = fit_p_tensor_poly(signal_backward, qs_backward)
+    ls_backward = polyeig_tensor(qs_backward)
+    ls_backward = ls_backward[np.abs(ls_backward) < 1]
+    ds_backward = residue(qs_backward, ps_backward, ls_backward)
+    # ds_forward, ds_backward = coeffs(ls_forward, ls_backward, signal)
+    return ResonanceBasis(ds_forward, ls_forward, ds_backward, ls_backward)
 
 
 def mdfpt(signal, degree):
