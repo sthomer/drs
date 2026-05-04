@@ -6,28 +6,64 @@ except ImportError as e:
         "Reinstall the package with: python -m pip install --no-build-isolation -e ."
     ) from e
 
-
 import numpy as np
 import scipy.linalg as la
+import torch
 
-def hankel(s, K):
-    """
-    Construct a Hankel matrix for a linear recurrence.
 
-    Parameters
-    ----------
-    s : ndarray, shape(N, M)
-        Sequence of vectors of length M
-    K : int
-        Order of the linear recurrence.
+class ResonanceBasis:
+    def __init__(self, ds_forward, ls_forward, ds_backward, ls_backward):
+        self.ds_forward = np.array(ds_forward)  # shape(M*K, M)
+        self.ls_forward = np.array(ls_forward)  # shape(M*K)
+        self.ds_backward = np.array(ds_backward)  # shape(M*K, M)
+        self.ls_backward = np.array(ls_backward)  # shape(M*K)
+        self.dimension = self.ds_forward.shape[1]
 
-    Returns
-    -------
-    ndarray, shape(N - K, M * K)
-        Hankel matrix
-    """
-    N, M = s.shape
-    return np.block([[s[k : k + K].ravel()] for k in range(N-K)])
+    def signal(self, length):
+        vander_forward = np.vander(np.array(self.ls_forward), length, increasing=True).T
+        signal_forward = vander_forward @ self.ds_forward
+        vander_backward = np.vander(
+            np.array(self.ls_backward), length, increasing=True
+        ).T
+        signal_backward = vander_backward @ self.ds_backward
+        signal = signal_forward + np.flipud(signal_backward)
+        return signal
+
+
+class LinearRecurrence:
+    def __init__(self, coefficients):
+        K, M, _ = coefficients.shape
+        self.coefficients = coefficients
+        self.degree = K
+        self.dimension = M
+
+    def generate_from(self, signal):
+        return LinearRecurrenceGenerator(self, signal)
+
+
+class LinearRecurrenceGenerator:
+    def __init__(self, recurrence, signal):
+        N, M = signal.shape
+        assert N == recurrence.degree
+        assert M == recurrence.dimension
+        self.recurrence = recurrence
+        self.signal = signal
+
+    def __iter__(self):
+        self._tail = self.signal[: self.recurrence.degree]
+        return self
+
+    def __next__(self):
+        # s = sum(
+        #     self.recurrence.coefficients[k] @ self._tail[k]
+        #     for k in range(self.recurrence.degree)
+        # )
+        s = np.einsum("ijk,ik->j", self.recurrence.coefficients, self._tail)
+        self._tail = np.block([[self._tail[1:]], [s]])
+        return s
+
+    def repeat(self, length):
+        return np.array([s for s, _ in zip(self, range(length))])
 
 
 def hankel_tensor(s, K):
@@ -50,30 +86,6 @@ def hankel_tensor(s, K):
     return np.stack([s[k : k + K] for k in range(N - K)])
 
 
-def fit_q_matpoly(s, K):
-    """
-    Solve for the coefficients of a linear recurrence.
-
-    Parameters
-    ----------
-    s : ndarray, shape(M, N)
-        Sequence of vectors of length M
-    K : int
-        Order of the linear recurrence
-
-    Returns
-    -------
-    ndarray, shape(M, M*K)
-        Matrix coefficients as a block "row vector"
-    """
-    A = hankel(s, K)
-    b = s[K:]
-    Qs = la.lstsq(A, b)
-    if Qs is not None:
-        return Qs[0].T
-    else:
-        raise la.LinAlgError
-
 def fit_q_tensor_poly(s, K):
     """
     Solve for the coefficients of a linear recurrence.
@@ -92,34 +104,16 @@ def fit_q_tensor_poly(s, K):
     """
     N, M = s.shape
     H_ = hankel_tensor(s, K)
-    H = H_.reshape(N-K, M*K)
+    H = H_.reshape(N - K, M * K)
     B = s[K:]
-    Q = la.lstsq(H, B)
+    # Q = la.lstsq(H, B)
+    Q = torch.linalg.lstsq(torch.from_numpy(H), torch.from_numpy(B.copy()))
     if Q is not None:
-        return Q[0].reshape(K, M, M).transpose(0, 2, 1)
+        # return Q[0].reshape(K, M, M).transpose(0, 2, 1)
+        return Q[0].numpy().reshape(K, M, M).transpose(0, 2, 1)
     else:
         raise la.LinAlgError
 
-
-def companion(Q, K, M):
-    """
-    Construct the Frobenius companion matrix for a monic matrix polynomial.
-
-    Parameters
-    ----------
-    Q : ndarray, shape(M, M*K)
-        Matrix coefficients as a block "row vector"
-    K : int
-        Order of the linear recurrence
-    M : int
-        Dimension of vector signal
-
-    Returns
-    -------
-    ndarray, shape(M*K, M*K)
-        Frobenius companion matrix
-    """
-    return np.block([[np.zeros((M * (K - 1), M)), np.eye(M * (K - 1))], [Q]])
 
 def companion_tensor(Q):
     """
@@ -138,31 +132,8 @@ def companion_tensor(Q):
     K, M, _ = Q.shape
     Z = np.zeros((M, M))
     I = np.eye(M)
-    return np.stack([k*[Z] + [I] + (K-k-1)*[Z] for k in range(1,K)] + [Q])
+    return np.stack([k * [Z] + [I] + (K - k - 1) * [Z] for k in range(1, K)] + [Q])
 
-
-def polyeig(Q, K, M):
-    """
-    Solve polynomial eigenvalue problem for a monic matrix polynomial.
-
-    Parameters
-    ----------
-    Q : ndarray, shape(M, M*K)
-        Matrix coefficients as a block "row vector"
-    K : int
-        Order of the linear recurrence
-    M : int
-        Dimension of vector signal
-
-    Returns
-    -------
-    eigenvalue : ndarray, shape(M*K)
-        Vector of eigenvalues
-    eigenvectors : ndarray, shape(M, M*K)
-        Matrix of eigenvectors
-    """
-    wv = la.eig(companion(Q, K, M), right=True)
-    return wv[0], wv[1][:M]
 
 def polyeig_tensor(Q):
     """
@@ -182,42 +153,85 @@ def polyeig_tensor(Q):
     """
     K, M, _ = Q.shape
     C_ = companion_tensor(Q)
-    C = C_.transpose(0,2,1,3).reshape(M*K, M*K)
-    wv = la.eig(C, right=True)
-    E, V = wv[0], wv[1][:M]
-    X = V / la.norm(V, axis=1, keepdims=True)
-    return E, X
-  
+    C = C_.transpose(0, 2, 1, 3).reshape(M * K, M * K)
+    E = torch.linalg.eigvals(torch.from_numpy(C))
+    return E
+    # wv = la.eig(C, right=True)
+    # E, V = wv[0], wv[1][:M]
+    # X = V / la.norm(V, axis=1, keepdims=True)
+    # return E, X
 
-def coeffs(E, X, S):
+
+def coeffs(ls_forward, ls_backward, signal):
     """
     Solve for resonance vectors amplitudes.
 
     Parameters
     ----------
-    E : ndarray, shape(M*K)
-        eigenvalues
-    X : ndarray, shape(M, M*K)
-        eigenvectors
-    S : ndarray, shape(N, M)
-        signal
+    ls_forward : ndarray, shape(K_forward)
+        Stable eigenvalues of the signal
+    ls_backward : ndarray, shape(K_backward)
+        Stable eigenvalues of the reverse signal
+    signal : ndarray, shape(N, M)
+        Signal of length N with M channels
 
     Returns
     -------
-    ndarray, shape(M*K, M)
-        Resonance vector amplitudes
+    ndarray, shape(K_forward, M)
+        Forward resonance vector amplitudes
+    ndarray, shape(K_backward, M)
+        Backward resonance vector amplitudes
+
+    Notes
+    ----
+    K_forward + K_backward = M * K
     """
-    N, M = S.shape
-    V = np.vander(E, N, increasing=True).T
-    G = X.T @ X
-    SX = S @ X
-    D_inv = V @ la.inv(SX @ SX.T) @ SX @ G
-    return D_inv
-    # D = la.lstsq(np.vander(evs, N, increasing=True).T, s)
-    # if D is not None:
-    #     return D[0]
-    # else:
-    #     raise la.LinAlgError
+    N, _ = signal.shape
+    vander_forward = np.vander(ls_forward, N, increasing=True).T
+    vander_backward = np.vander(ls_backward, N, increasing=True).T
+    vander = np.block([[vander_forward, np.flipud(vander_backward)]])
+    D = torch.linalg.lstsq(
+        torch.from_numpy(vander), torch.from_numpy(signal.astype(np.complex128))
+    )
+    # D = la.lstsq(vander, signal)
+    if D is not None:
+        return D[0][: len(ls_forward)], D[0][len(ls_forward) :]
+    else:
+        raise la.LinAlgError
+
+
+def mdfpt(signal, degree):
+    """
+    Decompose a signal into its resonance basis.
+
+    If the signal has M channels and the resonance basis has degree K,
+    there are M*K resonance vectors in the decomposition
+    split between damping and ramping resonances.
+
+    Parameters
+    ----------
+    signal : ndarray, shape(N, M)
+        Signal of length N with M channels
+    degree : int
+        Degree of the underlying matrix polynomial
+
+    Returns
+    -------
+    ResonanceBasis
+        A resonance basis composed of:
+        - Initial resonant amplitude vectors for damping resonances
+        - Damping resonant frequencies (damping in forward time)
+        - Final resonance amplitude vectors for ramping resonances
+        - Ramping resonant frequencies (damping in reverse time)
+    """
+    qs_forward = fit_q_tensor_poly(signal, degree)
+    ls_forward = polyeig_tensor(qs_forward)
+    ls_forward = ls_forward[np.abs(ls_forward) < 1]
+    qs_backward = fit_q_tensor_poly(np.flipud(signal), degree)
+    ls_backward = polyeig_tensor(qs_backward)
+    ls_backward = ls_backward[np.abs(ls_backward) < 1]
+    ds_forward, ds_backward = coeffs(ls_forward, ls_backward, signal)
+    return ResonanceBasis(ds_forward, ls_forward, ds_backward, ls_backward)
 
 
 def fit_q_poly(cs, K):
