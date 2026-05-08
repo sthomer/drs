@@ -5,3 +5,5 @@ mise.toml
 old_drs
 **/*.dylib
 **/*.so
+/build/lib/drs
+/src/drs.egg-info

@@ -22,6 +22,7 @@ dependencies = [
   "torchvision>=0.26.0",
   "triton-xpu>=3.7.0 ; sys_platform == 'linux'",
   "torchaudio>=2.11.0",
+  "meson-python>=0.19.0",
 ]
 
 [tool.uv.sources]
@@ -42,3 +43,6 @@ triton-xpu = [
 name = "pytorch-xpu"
 url = "https://download.pytorch.org/whl/xpu"
 explicit = true
+
+[tool.uv.extra-build-dependencies]
+drs = ["meson-python"]
