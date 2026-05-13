@@ -9,11 +9,6 @@ except ImportError as e:
 import numpy as np
 import scipy.linalg as la
 
-import torch
-
-device = torch.device("xpu" if torch.xpu.is_available() else "cpu")
-torch.set_default_device(device)
-
 
 class ResonanceBasis:
     """
@@ -49,50 +44,58 @@ class ResonanceBasis:
         self.dimension = self.forward.dimension
 
     def signal(self, length):
-        s = self.forward.signal(length) + self.backward.signal(length)
-        return s.detach().cpu().numpy()
+        return self.forward.signal(length) + self.backward.signal(length)
 
     @classmethod
     def fit(cls, signal, degree):
-        signal = signal.to(device)
         n = signal.shape[0]
-        ls_forward = LinearRecurrence.fit(signal, degree).eigvals()
-        ls_forward = ls_forward[torch.abs(ls_forward) < 1]
-        ls_backward = LinearRecurrence.fit(torch.flipud(signal), degree).eigvals()
-        ls_backward = ls_backward[torch.abs(ls_backward) < 1]
+        ls_forward, xs_forward = LinearRecurrence.fit(signal, degree).eig()
+        mask_forward = np.abs(ls_forward) < 1
+        ls_forward = ls_forward[mask_forward]
+        xs_forward = xs_forward[mask_forward]
+        ls_backward, xs_backward = LinearRecurrence.fit(np.flipud(signal), degree).eig()
+        mask_backward = np.abs(ls_backward) < 1
+        ls_backward = ls_backward[mask_backward]
+        xs_backward = xs_backward[mask_backward]
 
-        vander_forward = torch.vander(ls_forward, n, increasing=True).T
-        vander_backward = torch.vander(ls_backward, n, increasing=True).T
-        vander = torch.cat([vander_forward, torch.flipud(vander_backward)], 1)
-        solution = torch.linalg.lstsq(vander, signal.to(torch.complex64)).solution
+        vander_forward = np.vander(ls_forward, n, increasing=True).T
+        vander_backward = np.vander(ls_backward, n, increasing=True).T
+        vander = np.concatenate([vander_forward, np.flipud(vander_backward)], axis=1)
+        result = la.lstsq(vander, signal)
+        if result is not None:
+            solution = result[0]
+        else:
+            raise la.LinAlgError
         ds_forward = solution[: len(ls_forward)]
         ds_backward = solution[len(ls_forward) :]
-        forward = ResonanceSet(ds_forward, ls_forward, "forward")
-        backward = ResonanceSet(ds_backward, ls_backward, "backward")
+
+        forward = ResonanceSet(ds_forward, ls_forward, xs_forward, "forward")
+        backward = ResonanceSet(ds_backward, ls_backward, xs_backward, "backward")
         return ResonanceBasis(forward, backward)
 
 
 class ResonanceSet:
-    def __init__(self, amplitudes, frequencies, direction):
-        self.amplitudes = torch.tensor(amplitudes)
-        self.frequencies = torch.tensor(frequencies)
+    def __init__(self, amplitudes, frequencies, vectors, direction):
+        self.amplitudes = np.array(amplitudes)
+        self.frequencies = np.array(frequencies)
+        self.vectors = np.array(vectors)
         self.direction = direction
         assert self.amplitudes.shape[0] == self.frequencies.shape[0]
         self.cardinality = self.frequencies.shape[0]
         self.dimension = self.amplitudes.shape[1]
 
     def signal(self, length):
-        vander = torch.vander(self.frequencies, length, increasing=True).T
+        vander = np.vander(self.frequencies, length, increasing=True).T
         signal = vander @ self.amplitudes
         if self.direction == "backward":
-            return torch.flipud(signal)
+            return np.flipud(signal)
         else:
             return signal
 
 
 class LinearRecurrence:
     def __init__(self, coefficients):
-        self.coefficients = torch.tensor(coefficients)
+        self.coefficients = np.array(coefficients)
         K, M, _ = self.coefficients.shape
         self.degree = K
         self.dimension = M
@@ -118,18 +121,26 @@ class LinearRecurrence:
             Matrix coefficients
         """
         N, M = s.shape
-        hankel = torch.stack([s[k : k + K] for k in range(N - K)]).reshape(N - K, M * K)
+        hankel = np.stack([s[k : k + K] for k in range(N - K)]).reshape(N - K, M * K)
         target = s[K:]
-        solution = torch.linalg.lstsq(hankel, target).solution
-        coefficients = solution.reshape(K, M, M).transpose(2, 1)
-        return LinearRecurrence(coefficients)
+        result = la.lstsq(hankel, target)
+        if result is not None:
+            solution = result[0]
+            coefficients = solution.reshape(K, M, M).transpose(0, 2, 1)
+            return LinearRecurrence(coefficients)
+        else:
+            raise la.LinAlgError
 
-    def eigvals(self):
+    def eig(self):
         k, m = self.degree, self.dimension
-        c = torch.zeros((m * k, m * k))
-        c[:-m, m:] = torch.diag(torch.ones(m * (k - 1)))
-        c[-m:, :] = self.coefficients.transpose(0, 1).reshape(m, m * k)
-        return torch.linalg.eigvals(c)
+        c = np.zeros((m * k, m * k))
+        c[:-m, m:] = np.diag(np.ones(m * (k - 1)))
+        c[-m:, :] = self.coefficients.transpose(1, 0, 2).reshape(m, m * k)
+        result = la.eig(c)
+        e = result[0]
+        vr = result[1][:m].T
+        v = vr / la.norm(vr, axis=1)[:, np.newaxis]
+        return e, v
 
 
 class LinearRecurrenceGenerator:
@@ -145,12 +156,12 @@ class LinearRecurrenceGenerator:
         return self
 
     def __next__(self):
-        s = torch.einsum("ijk,ik->j", self.recurrence.coefficients, self._tail)
-        self._tail = torch.cat([self._tail[1:], s])
+        s = np.einsum("ijk,ik->j", self.recurrence.coefficients, self._tail)
+        self._tail = np.concatenate([self._tail[1:], s])
         return s
 
     def repeat(self, length):
-        return torch.tensor([s for s, _ in zip(self, range(length))])
+        return np.array([s for s, _ in zip(self, range(length))])
 
 
 def fit_q_poly(cs, K):
