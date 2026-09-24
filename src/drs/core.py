@@ -6,162 +6,218 @@ except ImportError as e:
         "Reinstall the package with: python -m pip install --no-build-isolation -e ."
     ) from e
 
+
 import numpy as np
 import scipy.linalg as la
 
-
-class ResonanceBasis:
+def hankel(s, K):
     """
-    A multidimensional resonance basis is composed of two sets of resonances
-    a forward set and a backward set,
+    Construct a Hankel matrix for a linear recurrence.
 
-    Attributes
+    Parameters
     ----------
-    forward : ResonanceSet
-        Forward resonance set.
-        Resonant amplitudes are the initial amplitudes of each resonance.
-        Resonance frequencies are damping.
-    backward : ResonanceSet
-        Backward resonance set.
-        Resonant amplitudes are the final amplitudes of each resonance.
-        Resonance frequencies are ramping. (Damping in reverse time)
-    cardinality : int
-        Total number of resonances in the resonance basis.
-    dimension : int
-        Dimension of resonance basis vectors
+    s : ndarray, shape(N, M)
+        Sequence of vectors of length M
+    K : int
+        Order of the linear recurrence.
 
-    Methods
+    Returns
     -------
-    signal(length)
-        Reconstruct a signal of a given length using this resonance basis.
+    ndarray, shape(N - K, M * K)
+        Hankel matrix
     """
-
-    def __init__(self, forward, backward):
-        self.forward = forward
-        self.backward = backward
-        self.cardinality = self.forward.cardinality + self.backward.cardinality
-        assert self.forward.dimension == self.backward.dimension
-        self.dimension = self.forward.dimension
-
-    def signal(self, length):
-        return self.forward.signal(length) + self.backward.signal(length)
-
-    @classmethod
-    def fit(cls, signal, degree):
-        n = signal.shape[0]
-        ls_forward, xs_forward = LinearRecurrence.fit(signal, degree).eig()
-        mask_forward = np.abs(ls_forward) < 1
-        ls_forward = ls_forward[mask_forward]
-        xs_forward = xs_forward[mask_forward]
-        ls_backward, xs_backward = LinearRecurrence.fit(np.flipud(signal), degree).eig()
-        mask_backward = np.abs(ls_backward) < 1
-        ls_backward = ls_backward[mask_backward]
-        xs_backward = xs_backward[mask_backward]
-
-        vander_forward = np.vander(ls_forward, n, increasing=True).T
-        vander_backward = np.vander(ls_backward, n, increasing=True).T
-        vander = np.concatenate([vander_forward, np.flipud(vander_backward)], axis=1)
-        result = la.lstsq(vander, signal)
-        if result is not None:
-            solution = result[0]
-        else:
-            raise la.LinAlgError
-        ds_forward = solution[: len(ls_forward)]
-        ds_backward = solution[len(ls_forward) :]
-
-        forward = ResonanceSet(ds_forward, ls_forward, xs_forward, "forward")
-        backward = ResonanceSet(ds_backward, ls_backward, xs_backward, "backward")
-        return ResonanceBasis(forward, backward)
+    N, M = s.shape
+    return np.block([[s[k : k + K].ravel()] for k in range(N-K)])
 
 
-class ResonanceSet:
-    def __init__(self, amplitudes, frequencies, vectors, direction):
-        self.amplitudes = np.array(amplitudes)
-        self.frequencies = np.array(frequencies)
-        self.vectors = np.array(vectors)
-        self.direction = direction
-        assert self.amplitudes.shape[0] == self.frequencies.shape[0]
-        self.cardinality = self.frequencies.shape[0]
-        self.dimension = self.amplitudes.shape[1]
+def hankel_tensor(s, K):
+    """
+    Construct a Hankel tensor for a linear recurrence.
 
-    def signal(self, length):
-        vander = np.vander(self.frequencies, length, increasing=True).T
-        signal = vander @ self.amplitudes
-        if self.direction == "backward":
-            return np.flipud(signal)
-        else:
-            return signal
+    Parameters
+    ----------
+    s : ndarray, shape(N, M)
+        Sequence of vectors of length M
+    K : int
+        Order of the linear recurrence.
 
-
-class LinearRecurrence:
-    def __init__(self, coefficients):
-        self.coefficients = np.array(coefficients)
-        K, M, _ = self.coefficients.shape
-        self.degree = K
-        self.dimension = M
-
-    def generate_from(self, signal):
-        return LinearRecurrenceGenerator(self, signal)
-
-    @classmethod
-    def fit(cls, s, K):
-        """
-        Solve for the coefficients of a linear recurrence.
-
-        Parameters
-        ----------
-        s : ndarray, shape(N, M)
-            Sequence of vectors of length M
-        K : int
-            Order of the linear recurrence
-
-        Returns
-        -------
-        ndarray, shape(K, M, M)
-            Matrix coefficients
-        """
-        N, M = s.shape
-        hankel = np.stack([s[k : k + K] for k in range(N - K)]).reshape(N - K, M * K)
-        target = s[K:]
-        result = la.lstsq(hankel, target)
-        if result is not None:
-            solution = result[0]
-            coefficients = solution.reshape(K, M, M).transpose(0, 2, 1)
-            return LinearRecurrence(coefficients)
-        else:
-            raise la.LinAlgError
-
-    def eig(self):
-        k, m = self.degree, self.dimension
-        c = np.zeros((m * k, m * k))
-        c[:-m, m:] = np.diag(np.ones(m * (k - 1)))
-        c[-m:, :] = self.coefficients.transpose(1, 0, 2).reshape(m, m * k)
-        result = la.eig(c)
-        e = result[0]
-        vr = result[1][:m].T
-        v = vr / la.norm(vr, axis=1)[:, np.newaxis]
-        return e, v
+    Returns
+    -------
+    ndarray, shape(N-K, K, M)
+        Hankel matrix
+    """
+    N = s.shape[0]
+    return np.stack([s[k : k + K] for k in range(N - K)])
 
 
-class LinearRecurrenceGenerator:
-    def __init__(self, recurrence, signal):
-        self.recurrence = recurrence
-        self.signal = signal
-        N, M = signal.shape
-        assert N == recurrence.degree
-        assert M == recurrence.dimension
+def fit_q_matpoly(s, K):
+    """
+    Solve for the coefficients of a linear recurrence.
 
-    def __iter__(self):
-        self._tail = self.signal[: self.recurrence.degree]
-        return self
+    Parameters
+    ----------
+    s : ndarray, shape(M, N)
+        Sequence of vectors of length M
+    K : int
+        Order of the linear recurrence
 
-    def __next__(self):
-        s = np.einsum("ijk,ik->j", self.recurrence.coefficients, self._tail)
-        self._tail = np.concatenate([self._tail[1:], s])
-        return s
+    Returns
+    -------
+    ndarray, shape(M, M*K)
+        Matrix coefficients as a block "row vector"
+    """
+    A = hankel(s, K)
+    b = s[K:]
+    Qs = la.lstsq(A, b)
+    if Qs is not None:
+        return Qs[0].T
+    else:
+        raise la.LinAlgError
 
-    def repeat(self, length):
-        return np.array([s for s, _ in zip(self, range(length))])
+def fit_q_tensor_poly(s, K):
+    """
+    Solve for the coefficients of a linear recurrence.
+
+    Parameters
+    ----------
+    s : ndarray, shape(N, M)
+        Sequence of vectors of length M
+    K : int
+        Order of the linear recurrence
+
+    Returns
+    -------
+    ndarray, shape(K, M, M)
+        Matrix coefficients
+    """
+    N, M = s.shape
+    H_ = hankel_tensor(s, K)
+    H = H_.reshape(N-K, M*K)
+    B = s[K:]
+    Q = la.lstsq(H, B)
+    if Q is not None:
+        return Q[0].reshape(K, M, M).transpose(0, 2, 1)
+    else:
+        raise la.LinAlgError
+
+
+def companion(Q, K, M):
+    """
+    Construct the Frobenius companion matrix for a monic matrix polynomial.
+
+    Parameters
+    ----------
+    Q : ndarray, shape(M, M*K)
+        Matrix coefficients as a block "row vector"
+    K : int
+        Order of the linear recurrence
+    M : int
+        Dimension of vector signal
+
+    Returns
+    -------
+    ndarray, shape(M*K, M*K)
+        Frobenius companion matrix
+    """
+    return np.block([[np.zeros((M * (K - 1), M)), np.eye(M * (K - 1))], [Q]])
+
+def companion_tensor(Q):
+    """
+    Construct the Frobenius companion tensor for a monic matrix polynomial.
+
+    Parameters
+    ----------
+    Q : ndarray, shape(K, M, M)
+        Matrix coefficients as a block "row vector"
+
+    Returns
+    -------
+    ndarray, shape(K, K, M, M)
+        Frobenius companion tensor
+    """
+    K, M, _ = Q.shape
+    Z = np.zeros((M, M))
+    I = np.eye(M)
+    return np.stack([k*[Z] + [I] + (K-k-1)*[Z] for k in range(1,K)] + [Q])
+
+
+def polyeig(Q, K, M):
+    """
+    Solve polynomial eigenvalue problem for a monic matrix polynomial.
+
+    Parameters
+    ----------
+    Q : ndarray, shape(M, M*K)
+        Matrix coefficients as a block "row vector"
+    K : int
+        Order of the linear recurrence
+    M : int
+        Dimension of vector signal
+
+    Returns
+    -------
+    eigenvalue : ndarray, shape(M*K)
+        Vector of eigenvalues
+    eigenvectors : ndarray, shape(M, M*K)
+        Matrix of eigenvectors
+    """
+    wv = la.eig(companion(Q, K, M), right=True)
+    return wv[0], wv[1][:M]
+
+def polyeig_tensor(Q):
+    """
+    Solve polynomial eigenvalue problem for a monic matrix polynomial.
+
+    Parameters
+    ----------
+    Q : ndarray, shape(K, M, M)
+        Matrix coefficients as a block "row vector"
+
+    Returns
+    -------
+    eigenvalue : ndarray, shape(M*K)
+        Vector of eigenvalues
+    eigenvectors : ndarray, shape(M, M*K)
+        Matrix of normalized eigenvectors
+    """
+    K, M, _ = Q.shape
+    C_ = companion_tensor(Q)
+    C = C_.transpose(0,2,1,3).reshape(M*K, M*K)
+    wv = la.eig(C, right=True)
+    E, V = wv[0], wv[1][:M]
+    X = V / la.norm(V, axis=1, keepdims=True)
+    return E, X
+  
+
+def coeffs(E, X, S):
+    """
+    Solve for resonance vectors amplitudes.
+
+    Parameters
+    ----------
+    E : ndarray, shape(M*K)
+        eigenvalues
+    X : ndarray, shape(M, M*K)
+        eigenvectors
+    S : ndarray, shape(N, M)
+        signal
+
+    Returns
+    -------
+    ndarray, shape(M*K, M)
+        Resonance vector amplitudes
+    """
+    N, M = S.shape
+    V = np.vander(E, N, increasing=True).T
+    G = X.T @ X
+    SX = S @ X
+    D_inv = V @ la.inv(SX @ SX.T) @ SX @ G
+    return D_inv
+    # D = la.lstsq(np.vander(evs, N, increasing=True).T, s)
+    # if D is not None:
+    #     return D[0]
+    # else:
+    #     raise la.LinAlgError
 
 
 def fit_q_poly(cs, K):
